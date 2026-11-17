@@ -1,31 +1,102 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#itemized receipts, Schedule C categories, base64 receipt photos, visible OCR scan button, and itemized line-item tables
-#V22 - Visible OCR Scan Button & Itemized Line-Items
+#itemized receipts, Schedule C categories, base64 receipt photos, and a multi-user login and registration system
+#V24 - Multi-User Accounts & Individual Vault Storage
 
 import streamlit as st
 from datetime import date
 import pandas as pd
 import base64
-import re
-from PIL import Image
-import pytesseract
 from tax_logic import load_data, save_data, reset_data
 from pdf_generator import generate_pdf_report
 
 # Page Configuration
 st.set_page_config(page_title="Freelancer Tax & Wealth Vault", page_icon="🏦", layout="centered")
 
-st.title("🏦 Freelancer Tax Vault & Wealth Dashboard")
-st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized receipts, and AI Receipt OCR Scanner.")
+# Initialize Master Database structure if not present
+if "vault_db" not in st.session_state:
+    raw_data = load_data()
+    # Ensure backwards compatibility if vault_db was structured as old flat data
+    if "users" not in raw_data:
+        st.session_state.vault_db = {
+            "users": {
+                "admin": {
+                    "password": "vault123",
+                    "earnings": raw_data.get("earnings", []),
+                    "expenses": raw_data.get("expenses", [])
+                }
+            }
+        }
+    else:
+        st.session_state.vault_db = raw_data
 
-# Load saved data into session state
-if "data" not in st.session_state:
-    st.session_state.data = load_data()
+def save_vault_db():
+    """Saves the multi-user database back to disk."""
+    save_data(st.session_state.vault_db)
 
-earnings_list = st.session_state.data["earnings"]
-expenses_list = st.session_state.data["expenses"]
+# --- AUTHENTICATION & REGISTRATION GATE ---
+if "authenticated_user" not in st.session_state:
+    st.session_state.authenticated_user = None
 
-# Ensure backwards compatibility for older data structures
+if st.session_state.authenticated_user is None:
+    st.title("🔐 Freelancer Tax Vault Portal")
+    st.write("Log in to your private financial vault or create a new account.")
+    
+    auth_tab1, auth_tab2 = st.tabs(["🔑 Log In", "📝 Create Account"])
+    
+    with auth_tab1:
+        st.subheader("Existing User Login")
+        with st.form("login_form"):
+            login_user = st.text_input("Username").strip().lower()
+            login_pass = st.text_input("Password", type="password")
+            login_btn = st.form_submit_button("Log In to Vault", type="primary")
+            
+            if login_btn:
+                users = st.session_state.vault_db.get("users", {})
+                if login_user in users and users[login_user]["password"] == login_pass:
+                    st.session_state.authenticated_user = login_user
+                    st.success(f"Welcome back, {login_user}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+                    
+    with auth_tab2:
+        st.subheader("Register New Account")
+        with st.form("register_form"):
+            new_user = st.text_input("Choose Username").strip().lower()
+            new_pass = st.text_input("Choose Password", type="password")
+            confirm_pass = st.text_input("Confirm Password", type="password")
+            reg_btn = st.form_submit_button("Create Vault Account", type="secondary")
+            
+            if reg_btn:
+                users = st.session_state.vault_db.setdefault("users", {})
+                if not new_user or not new_pass:
+                    st.warning("Please fill in both username and password.")
+                elif new_user in users:
+                    st.error("Username already exists. Please choose another or log in.")
+                elif new_pass != confirm_pass:
+                    st.error("Passwords do not match.")
+                else:
+                    # Create new user vault
+                    users[new_user] = {
+                        "password": new_pass,
+                        "earnings": [],
+                        "expenses": []
+                    }
+                    save_vault_db()
+                    st.session_state.authenticated_user = new_user
+                    st.success(f"Account created successfully! Welcome, {new_user}!")
+                    st.rerun()
+                    
+    st.stop()
+
+# --- MAIN APP (Runs only when a specific user is logged in) ---
+current_user = st.session_state.authenticated_user
+user_data = st.session_state.vault_db["users"][current_user]
+
+earnings_list = user_data["earnings"]
+expenses_list = user_data["expenses"]
+
+# Ensure backwards compatibility for older data structures within user profile
 for item in earnings_list:
     item.setdefault("date", str(date.today()))
     item.setdefault("tax_alloc", item.get("amount", 0.0) * 0.25)
@@ -78,22 +149,12 @@ def auto_categorize_expense(description):
     else:
         return 12 
 
-def scan_receipt_with_ocr(image_file):
-    """Uses Tesseract OCR with explicit Linux path binding to extract text and totals."""
-    try:
-        pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
-        img = Image.open(image_file)
-        raw_text = pytesseract.image_to_string(img)
-        
-        amounts = re.findall(r'\b\d+\.\d{2}\b', raw_text)
-        float_amounts = [float(amt) for amt in amounts]
-        
-        suggested_cost = max(float_amounts) if float_amounts else 0.0
-        return raw_text.strip(), suggested_cost
-    except Exception as e:
-        return f"OCR Error: {str(e)}", 0.0
+# --- SIDEBAR: SETTINGS & USER INFO ---
+st.sidebar.title(f"👤 Vault: {current_user.capitalize()}")
+if st.sidebar.button("🚪 Log Out"):
+    st.session_state.authenticated_user = None
+    st.rerun()
 
-# --- SIDEBAR: SETTINGS & ALLOCATIONS ---
 st.sidebar.header("⚙️ Multi-Bucket & Tax Settings")
 tax_rate_percent = st.sidebar.slider("Tax Withholding Rate (%)", min_value=10, max_value=50, value=25, step=1)
 savings_rate_percent = st.sidebar.slider("Emergency Savings Allocation (%)", min_value=0, max_value=25, value=10, step=1)
@@ -119,10 +180,12 @@ action = st.sidebar.radio("Go to:", [
 
 # --- SIDEBAR: DATA MANAGEMENT / RESET ---
 st.sidebar.write("---")
-st.sidebar.subheader("🗄️ Data Management")
-if st.sidebar.button("🔄 Reset Vault & Clear All Data", type="secondary"):
-    st.session_state.data = reset_data()
-    st.sidebar.success("Vault data cleared successfully!")
+st.sidebar.subheader("🗄️ Vault Data Management")
+if st.sidebar.button("🔄 Reset My Vault Data", type="secondary"):
+    user_data["earnings"] = []
+    user_data["expenses"] = []
+    save_vault_db()
+    st.sidebar.success("Your vault records were cleared!")
     st.rerun()
 
 # --- CALCULATIONS ---
@@ -138,7 +201,7 @@ taxable_profit = total_earned - total_exp
 
 # --- VIEW 1: DASHBOARD ---
 if action == "Dashboard (Vault View)":
-    st.subheader("📊 Your Financial Wealth & Vault Snapshot")
+    st.subheader(f"📊 Financial Wealth & Vault Snapshot ({current_user})")
     
     col1, col2, col3 = st.columns(3)
     col1.metric("Gross Revenue", f"${total_earned:,.2f}")
@@ -187,7 +250,7 @@ if action == "Dashboard (Vault View)":
                 
                 if ec2.button("Delete Expense", key=f"del_exp_{i}"):
                     expenses_list.remove(exp)
-                    save_data(st.session_state.data)
+                    save_vault_db()
                     st.rerun()
 
                 itemized = exp.get("itemized_items", [])
@@ -223,7 +286,7 @@ elif action == "Log Client Payment":
                 locked_retirement = payment_amount * retirement_rate
                 spend = payment_amount - (locked_tax + locked_savings + locked_retirement)
                 
-                st.session_state.data["earnings"].append({
+                earnings_list.append({
                     "date": str(payment_date),
                     "client": client_name,
                     "amount": payment_amount,
@@ -232,7 +295,7 @@ elif action == "Log Client Payment":
                     "retirement_alloc": locked_retirement,
                     "spend_alloc": spend
                 })
-                save_data(st.session_state.data)
+                save_vault_db()
                 
                 st.success(f"Generated Itemized Receipt for ${payment_amount:,.2f} from {client_name}!")
                 st.balloons()
@@ -241,33 +304,16 @@ elif action == "Log Client Payment":
 
 # --- VIEW 3: LOG EXPENSE ---
 elif action == "Log Business Expense":
-    st.subheader("🧾 AI OCR Receipt Scanner & Itemized Breakdown")
-    
-    if "ocr_scanned_cost" not in st.session_state:
-        st.session_state.ocr_scanned_cost = 0.0
+    st.subheader("🧾 Receipt Uploader & Itemized Breakdown")
 
-    receipt_file = st.file_uploader("1. Snap or Upload Receipt Photo", type=["png", "jpg", "jpeg"])
+    receipt_file = st.file_uploader("1. Upload Receipt Photo", type=["png", "jpg", "jpeg"])
     
-    # VISIBLE SCAN BUTTON RIGHT UNDER UPLOADER
-    if receipt_file is not None:
-        if st.button("🔍 CLICK HERE TO RUN AI OCR SCAN ON RECEIPT", type="primary"):
-            with st.spinner("Scanning receipt pixels and extracting total amount..."):
-                scanned_text, detected_amount = scan_receipt_with_ocr(receipt_file)
-                st.session_state.ocr_scanned_cost = detected_amount
-                if detected_amount > 0:
-                    st.success(f"OCR Scan Successful! Auto-detected total: ${detected_amount:,.2f}")
-                else:
-                    st.warning("OCR could not auto-detect a clear total, but you can enter it manually below.")
-                if scanned_text:
-                    with st.expander("View Raw OCR Scanned Text"):
-                        st.text(scanned_text)
-
     exp_desc = st.text_input("Merchant / Overall Expense Description (e.g., Office Depot Supplies)")
     
     suggested_index = auto_categorize_expense(exp_desc) if exp_desc else 12
     category = st.selectbox("Primary Schedule C Category", SCHEDULE_C_CATEGORIES, index=suggested_index)
     
-    exp_cost = st.number_input("Total Receipt Amount Paid ($)", min_value=0.0, value=st.session_state.ocr_scanned_cost, step=10.0, format="%.2f")
+    exp_cost = st.number_input("Total Receipt Amount Paid ($)", min_value=0.0, step=10.0, format="%.2f")
     
     business_percentage = st.slider(
         "Business Use Percentage (%)", 
@@ -298,7 +344,7 @@ elif action == "Log Business Expense":
 
     exp_date = st.date_input("Expense Date", value=date.today())
     
-    if st.button("Save Itemized Expense & Write-off", type="secondary"):
+    if st.button("Save Itemized Expense & Write-off", type="primary"):
         if exp_desc:
             base_deductible = exp_cost * (business_percentage / 100.0)
             if "50%" in category:
@@ -312,7 +358,7 @@ elif action == "Log Business Expense":
                 img_bytes = receipt_file.read()
                 img_b64 = base64.b64encode(img_bytes).decode('utf-8')
             
-            st.session_state.data["expenses"].append({
+            expenses_list.append({
                 "date": str(exp_date),
                 "description": exp_desc,
                 "category": category,
@@ -322,9 +368,8 @@ elif action == "Log Business Expense":
                 "itemized_items": itemized_list,
                 "receipt_img_b64": img_b64
             })
-            save_data(st.session_state.data)
+            save_vault_db()
             st.success(f"Successfully logged itemized expense! Tax write-off: -${deductible_amount:,.2f}.")
-            st.session_state.ocr_scanned_cost = 0.0
             st.balloons()
         else:
             st.warning("Please enter an overall expense description or merchant name.")
@@ -365,7 +410,7 @@ elif action == "Import Bank CSV":
                         r_alloc = amt * retirement_rate
                         sp_alloc = amt - (t_alloc + s_alloc + r_alloc)
                         
-                        st.session_state.data["earnings"].append({
+                        earnings_list.append({
                             "date": tx_date,
                             "client": tx_desc,
                             "amount": amt,
@@ -381,7 +426,7 @@ elif action == "Import Bank CSV":
                         cat_label = SCHEDULE_C_CATEGORIES[suggested_idx]
                         ded_rate = 0.50 if "50%" in cat_label else 1.0
                         
-                        st.session_state.data["expenses"].append({
+                        expenses_list.append({
                             "date": tx_date,
                             "description": tx_desc,
                             "category": cat_label,
@@ -395,7 +440,7 @@ elif action == "Import Bank CSV":
                 except Exception:
                     continue
             
-            save_data(st.session_state.data)
+            save_vault_db()
             st.success(f"Successfully imported {imported_count} transactions!")
             st.balloons()
 
