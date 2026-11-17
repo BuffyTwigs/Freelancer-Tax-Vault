@@ -1,6 +1,6 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#itemized receipts, Schedule C categories, base64 receipt photos, multi-user login, registration, and password recovery
-#V25 - Multi-User Vault with Password Recovery Gate
+#itemized receipts, Schedule C categories, base64 receipt photos, multi-user login, registration, password recovery, and account settings
+#V26 - Multi-User Vault with Account Settings & Recovery PIN Management
 
 import streamlit as st
 from datetime import date
@@ -90,7 +90,7 @@ if st.session_state.authenticated_user is None:
 
     with auth_tab3:
         st.subheader("Forgot Password / Recovery")
-        st.write("Enter your username and the secret recovery word you chose when creating your account.")
+        st.write("Enter your username and your secret recovery word to set a new password.")
         with st.form("recovery_form"):
             rec_user = st.text_input("Username").strip().lower()
             rec_word = st.text_input("Secret Recovery Word/PIN", type="password").strip().lower()
@@ -100,7 +100,7 @@ if st.session_state.authenticated_user is None:
             if reset_btn:
                 users = st.session_state.vault_db.get("users", {})
                 if rec_user in users:
-                    # Check if recovery word matches (defaulting admin to 'recovery' if not set)
+                    # Fallback for older accounts created before recovery words existed
                     stored_recovery = users[rec_user].get("recovery_word", "recovery")
                     if rec_word == stored_recovery:
                         if new_pass_reset:
@@ -121,6 +121,11 @@ if st.session_state.authenticated_user is None:
 # --- MAIN APP (Runs only when a specific user is logged in) ---
 current_user = st.session_state.authenticated_user
 user_data = st.session_state.vault_db["users"][current_user]
+
+# Ensure backwards compatibility for older accounts missing recovery words
+if "recovery_word" not in user_data:
+    user_data["recovery_word"] = "recovery"
+    save_vault_db()
 
 earnings_list = user_data["earnings"]
 expenses_list = user_data["expenses"]
@@ -204,7 +209,8 @@ action = st.sidebar.radio("Go to:", [
     "Log Client Payment", 
     "Log Business Expense", 
     "Import Bank CSV", 
-    "Quarterly Tax Report & PDF Export"
+    "Quarterly Tax Report & PDF Export",
+    "🔒 Account Settings & Security"
 ])
 
 # --- SIDEBAR: DATA MANAGEMENT / RESET ---
@@ -385,15 +391,4 @@ elif action == "Log Business Expense":
             if receipt_file is not None:
                 receipt_file.seek(0)
                 img_bytes = receipt_file.read()
-                img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-            
-            expenses_list.append({
-                "date": str(exp_date),
-                "description": exp_desc,
-                "category": category,
-                "cost": deductible_amount,
-                "raw_cost": exp_cost,
-                "business_percentage": business_percentage,
-                "itemized_items": itemized_list,
-                "receipt_img_b64": img_b64
-            })
+                img_b64 = base64.b64encode(img_bytes).
