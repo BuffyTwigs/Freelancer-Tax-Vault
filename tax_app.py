@@ -1,6 +1,6 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
 #itemized receipts, Schedule C categories, base64 receipt photos, multi-user login, registration, password recovery, and account settings
-#V26.1 - Multi-User Vault with Account Settings & Fixed Base64 Encoding
+#V26.2 - Fully Assembled Multi-User Vault App
 
 import streamlit as st
 from datetime import date
@@ -339,5 +339,105 @@ elif action == "Log Business Expense":
     
     exp_cost = st.number_input("Total Receipt Amount Paid (\$)", min_value=0.0, step=10.0, format="%.2f")
     
-    business_percentage = st.slider(
-        "Business Use Percentage (%)",
+    business_percentage = st.slider("Business Use Percentage (%)", min_value=0, max_value=100, value=100, step=5)
+    
+    st.write("---")
+    st.write("🛒 **Itemized Receipt Line-Items (Optional)**")
+    num_items = st.number_input("How many individual line items to itemize?", min_value=0, max_value=10, value=0, step=1)
+    
+    itemized_list = []
+    if num_items > 0:
+        for idx in range(int(num_items)):
+            cols = st.columns([2, 1, 2])
+            with cols[0]:
+                it_name = st.text_input(f"Item #{idx+1} Name", key=f"it_name_{idx}")
+            with cols[1]:
+                it_price = st.number_input(f"Price (\$)", min_value=0.0, step=1.0, key=f"it_price_{idx}")
+            with cols[2]:
+                it_cat = st.selectbox(f"Category", SCHEDULE_C_CATEGORIES, key=f"it_cat_{idx}")
+            
+            if it_name:
+                itemized_list.append({
+                    "Item": it_name,
+                    "Price": f"\${it_price:,.2f}",
+                    "Category": it_cat.split(" - ")[0]
+                })
+
+    exp_date = st.date_input("Expense Date", value=date.today())
+    
+    if st.button("Save Itemized Expense & Write-off", type="primary"):
+        if exp_desc:
+            base_deductible = exp_cost * (business_percentage / 100.0)
+            if "50%" in category:
+                deductible_amount = base_deductible * 0.50
+            else:
+                deductible_amount = base_deductible
+            
+            img_b64 = None
+            if receipt_file is not None:
+                receipt_file.seek(0)
+                img_bytes = receipt_file.read()
+                img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+            
+            expenses_list.append({
+                "date": str(exp_date),
+                "description": exp_desc,
+                "category": category,
+                "cost": deductible_amount,
+                "raw_cost": exp_cost,
+                "business_percentage": business_percentage,
+                "itemized_items": itemized_list,
+                "receipt_img_b64": img_b64
+            })
+            save_vault_db()
+            st.success(f"Successfully logged itemized expense! Tax write-off: -\${deductible_amount:,.2f}.")
+            st.balloons()
+        else:
+            st.warning("Please enter an overall expense description or merchant name.")
+
+elif action == "Import Bank CSV":
+    st.subheader("📥 Bulk Import Bank Statement (CSV)")
+    uploaded_file = st.file_uploader("Upload bank statement (.csv)", type=["csv"])
+    
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+        st.write("### 👀 Preview Uploaded Data", df.head())
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            date_col = st.selectbox("Date Column", df.columns)
+        with col2:
+            desc_col = st.selectbox("Description / Client Column", df.columns)
+        with col3:
+            amount_col = st.selectbox("Amount Column (\$)", df.columns)
+            
+        import_type = st.radio("Are these mostly Income or Expenses?", ["Income (Client Payments)", "Expenses (Write-offs)"])
+        
+        if st.button("Process & Save to Vault"):
+            imported_count = 0
+            for _, row in df.iterrows():
+                try:
+                    raw_amt = str(row[amount_col]).replace("\$", "").replace(",", "").strip()
+                    amt = float(raw_amt)
+                    if amt == 0:
+                        continue
+                    tx_date = str(row[date_col])
+                    tx_desc = str(row[desc_col])
+                    
+                    if import_type == "Income (Client Payments)" and amt > 0:
+                        t_alloc = amt * tax_rate
+                        s_alloc = amt * savings_rate
+                        r_alloc = amt * retirement_rate
+                        sp_alloc = amt - (t_alloc + s_alloc + r_alloc)
+                        
+                        earnings_list.append({
+                            "date": tx_date,
+                            "client": tx_desc,
+                            "amount": amt,
+                            "tax_alloc": t_alloc,
+                            "savings_alloc": s_alloc,
+                            "retirement_alloc": r_alloc,
+                            "spend_alloc": sp_alloc
+                        })
+                        imported_count += 1
+                    elif import_type == "Expenses (Write-offs
