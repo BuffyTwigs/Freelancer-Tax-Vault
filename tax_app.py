@@ -1,6 +1,6 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
 #itemized receipts, Schedule C categories, base64 receipt photos, multi-user login, registration, password recovery, and account settings
-#V26 - Multi-User Vault with Account Settings & Recovery PIN Management
+#V26.1 - Multi-User Vault with Account Settings & Fixed Base64 Encoding
 
 import streamlit as st
 from datetime import date
@@ -100,7 +100,6 @@ if st.session_state.authenticated_user is None:
             if reset_btn:
                 users = st.session_state.vault_db.get("users", {})
                 if rec_user in users:
-                    # Fallback for older accounts created before recovery words existed
                     stored_recovery = users[rec_user].get("recovery_word", "recovery")
                     if rec_word == stored_recovery:
                         if new_pass_reset:
@@ -122,7 +121,6 @@ if st.session_state.authenticated_user is None:
 current_user = st.session_state.authenticated_user
 user_data = st.session_state.vault_db["users"][current_user]
 
-# Ensure backwards compatibility for older accounts missing recovery words
 if "recovery_word" not in user_data:
     user_data["recovery_word"] = "recovery"
     save_vault_db()
@@ -130,7 +128,6 @@ if "recovery_word" not in user_data:
 earnings_list = user_data["earnings"]
 expenses_list = user_data["expenses"]
 
-# Ensure backwards compatibility for older data structures within user profile
 for item in earnings_list:
     item.setdefault("date", str(date.today()))
     item.setdefault("tax_alloc", item.get("amount", 0.0) * 0.25)
@@ -146,7 +143,6 @@ for item in expenses_list:
     item.setdefault("itemized_items", [])
     item.setdefault("receipt_img_b64", None)
 
-# Official IRS Schedule C Categories
 SCHEDULE_C_CATEGORIES = [
     "Advertising & Marketing (Line 8) - 100%",
     "Car & Truck / Gas & Mileage (Line 9) - 100%",
@@ -164,7 +160,6 @@ SCHEDULE_C_CATEGORIES = [
 ]
 
 def auto_categorize_expense(description):
-    """Scans merchant text to auto-suggest a Schedule C category index."""
     desc_upper = description.upper()
     if any(k in desc_upper for k in ["META", "GOOGLE ADS", "FACEBOOK", "PRINT", "FLYER"]):
         return 0 
@@ -183,7 +178,6 @@ def auto_categorize_expense(description):
     else:
         return 12 
 
-# --- SIDEBAR: SETTINGS & USER INFO ---
 st.sidebar.title(f"👤 Vault: {current_user.capitalize()}")
 if st.sidebar.button("🚪 Log Out"):
     st.session_state.authenticated_user = None
@@ -213,7 +207,6 @@ action = st.sidebar.radio("Go to:", [
     "🔒 Account Settings & Security"
 ])
 
-# --- SIDEBAR: DATA MANAGEMENT / RESET ---
 st.sidebar.write("---")
 st.sidebar.subheader("🗄️ Vault Data Management")
 if st.sidebar.button("🔄 Reset My Vault Data", type="secondary"):
@@ -223,7 +216,6 @@ if st.sidebar.button("🔄 Reset My Vault Data", type="secondary"):
     st.sidebar.success("Your vault records were cleared!")
     st.rerun()
 
-# --- CALCULATIONS ---
 total_earned = sum(item["amount"] for item in earnings_list)
 total_exp = sum(item["cost"] for item in expenses_list)
 
@@ -234,7 +226,6 @@ spending_money = sum(item.get("spend_alloc", item["amount"] * (1 - tax_rate - sa
 
 taxable_profit = total_earned - total_exp
 
-# --- VIEW 1: DASHBOARD ---
 if action == "Dashboard (Vault View)":
     st.subheader(f"📊 Financial Wealth & Vault Snapshot ({current_user})")
     
@@ -305,7 +296,6 @@ if action == "Dashboard (Vault View)":
     else:
         st.info("No business expenses logged yet.")
 
-# --- VIEW 2: LOG CLIENT PAYMENT ---
 elif action == "Log Client Payment":
     st.subheader("💰 Log Incoming Client Payment")
     with st.form("payment_form"):
@@ -337,7 +327,6 @@ elif action == "Log Client Payment":
             else:
                 st.warning("Please enter a client name.")
 
-# --- VIEW 3: LOG EXPENSE ---
 elif action == "Log Business Expense":
     st.subheader("🧾 Receipt Uploader & Itemized Breakdown")
 
@@ -351,44 +340,4 @@ elif action == "Log Business Expense":
     exp_cost = st.number_input("Total Receipt Amount Paid (\$)", min_value=0.0, step=10.0, format="%.2f")
     
     business_percentage = st.slider(
-        "Business Use Percentage (%)", 
-        min_value=0, max_value=100, value=100, step=5
-    )
-    
-    st.write("---")
-    st.write("🛒 **Itemized Receipt Line-Items (Optional)**")
-    num_items = st.number_input("How many individual line items to itemize?", min_value=0, max_value=10, value=0, step=1)
-    
-    itemized_list = []
-    if num_items > 0:
-        for idx in range(int(num_items)):
-            cols = st.columns([2, 1, 2])
-            with cols[0]:
-                it_name = st.text_input(f"Item #{idx+1} Name", key=f"it_name_{idx}")
-            with cols[1]:
-                it_price = st.number_input(f"Price (\$)", min_value=0.0, step=1.0, key=f"it_price_{idx}")
-            with cols[2]:
-                it_cat = st.selectbox(f"Category", SCHEDULE_C_CATEGORIES, key=f"it_cat_{idx}")
-            
-            if it_name:
-                itemized_list.append({
-                    "Item": it_name,
-                    "Price": f"\${it_price:,.2f}",
-                    "Category": it_cat.split(" - ")[0]
-                })
-
-    exp_date = st.date_input("Expense Date", value=date.today())
-    
-    if st.button("Save Itemized Expense & Write-off", type="primary"):
-        if exp_desc:
-            base_deductible = exp_cost * (business_percentage / 100.0)
-            if "50%" in category:
-                deductible_amount = base_deductible * 0.50
-            else:
-                deductible_amount = base_deductible
-            
-            img_b64 = None
-            if receipt_file is not None:
-                receipt_file.seek(0)
-                img_bytes = receipt_file.read()
-                img_b64 = base64.b64encode(img_bytes).
+        "Business Use Percentage (%)",
