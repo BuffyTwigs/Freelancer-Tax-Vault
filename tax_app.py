@@ -1,11 +1,14 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#itemized receipts, Schedule C categories, base64 receipt photos, and a smart Business vs. Personal expense splitter
-#V19 - Smart Receipt Scanner & Business/Personal Splitter
+#itemized receipts, Schedule C categories, base64 receipt photos, and free Tesseract OCR receipt scanning
+#V20 - Free Tesseract OCR Receipt Scanner & Smart Expense Splitter
 
 import streamlit as st
 from datetime import date
 import pandas as pd
 import base64
+import re
+from PIL import Image
+import pytesseract
 from tax_logic import load_data, save_data, reset_data
 from pdf_generator import generate_pdf_report
 
@@ -13,7 +16,7 @@ from pdf_generator import generate_pdf_report
 st.set_page_config(page_title="Freelancer Tax & Wealth Vault", page_icon="🏦", layout="centered")
 
 st.title("🏦 Freelancer Tax Vault & Wealth Dashboard")
-st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized receipts, and Smart Business/Personal Expense Splitter.")
+st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized receipts, and AI Receipt OCR Scanner.")
 
 # Load saved data into session state
 if "data" not in st.session_state:
@@ -58,21 +61,36 @@ def auto_categorize_expense(description):
     """Scans merchant text to auto-suggest a Schedule C category."""
     desc_upper = description.upper()
     if any(k in desc_upper for k in ["META", "GOOGLE ADS", "FACEBOOK", "PRINT", "FLYER"]):
-        return 0 # Advertising index
+        return 0 
     elif any(k in desc_upper for k in ["SHELL", "CHEVRON", "EXXON", "GAS", "UBER", "AUTOZONE"]):
-        return 1 # Car & Truck index
+        return 1 
     elif any(k in desc_upper for k in ["ADOBE", "AWS", "GITHUB", "MICROSOFT", "APPLE", "STAPLES", "ZOOM"]):
-        return 5 # Office & Software index
+        return 5 
     elif any(k in desc_upper for k in ["HOME DEPOT", "LOWES", "HARBOR FREIGHT", "AMAZON"]):
-        return 8 # Supplies index
+        return 8 
     elif any(k in desc_upper for k in ["AIRLINE", "DELTA", "HOTEL", "AIRBNB"]):
-        return 9 # Travel index
+        return 9 
     elif any(k in desc_upper for k in ["STARBUCKS", "MCDONALDS", "CHIPOTLE", "RESTAURANT", "CAFE"]):
-        return 10 # Business Meals index
+        return 10 
     elif any(k in desc_upper for k in ["VERIZON", "AT&T", "COMCAST", "PG&E"]):
-        return 11 # Utilities index
+        return 11 
     else:
-        return 12 # Other general index
+        return 12 
+
+def scan_receipt_with_ocr(image_file):
+    """Uses Tesseract OCR to extract text and find the largest dollar amount on a receipt."""
+    try:
+        img = Image.open(image_file)
+        raw_text = pytesseract.image_to_string(img)
+        
+        # Search for all dollar-like amounts (e.g., 45.99, 12.00)
+        amounts = re.findall(r'\b\d+\.\d{2}\b', raw_text)
+        float_amounts = [float(amt) for amt in amounts]
+        
+        suggested_cost = max(float_amounts) if float_amounts else 0.0
+        return raw_text.strip(), suggested_cost
+    except Exception as e:
+        return "", 0.0
 
 # --- SIDEBAR: SETTINGS & ALLOCATIONS ---
 st.sidebar.header("⚙️ Multi-Bucket & Tax Settings")
@@ -173,7 +191,7 @@ if action == "Dashboard (Vault View)":
 
                 if exp.get("receipt_img_b64") is not None:
                     st.write("---")
-                    st.write("📎 **Attached Receipt Photo:**")
+                    st.write("📎 **Attached Receipt Photo & OCR Data:**")
                     img_bytes = base64.b64decode(exp["receipt_img_b64"])
                     st.image(img_bytes, caption=exp['description'], use_container_width=True)
                 else:
@@ -215,58 +233,72 @@ elif action == "Log Client Payment":
 
 # --- VIEW 3: LOG EXPENSE ---
 elif action == "Log Business Expense":
-    st.subheader("🧾 Smart Receipt Scanner & Expense Splitter")
+    st.subheader("🧾 AI OCR Receipt Scanner & Expense Splitter")
     
-    with st.container():
-        # Receipt photo uploader first so user can snap photo
-        receipt_file = st.file_uploader("Snap or Upload Receipt Photo", type=["png", "jpg", "jpeg"])
-        
-        # Pre-fill description if user types merchant
-        exp_desc = st.text_input("Merchant / Expense Description (e.g., Staples Printer Ink, Starbucks Coffee)")
-        
-        # Auto-suggest category based on merchant text
-        suggested_index = auto_categorize_expense(exp_desc) if exp_desc else 12
-        category = st.selectbox("Schedule C Category (Auto-Suggested)", SCHEDULE_C_CATEGORIES, index=suggested_index)
-        
-        exp_cost = st.number_input("Total Receipt Amount Paid ($)", min_value=0.0, step=10.0, format="%.2f")
-        
-        # Mom's feature: Business vs Personal Split Slider!
-        business_percentage = st.slider(
-            "Business Use Percentage (%) — Move to 0% if personal!", 
-            min_value=0, max_value=100, value=100, step=5,
-            help="If this receipt is 100% for business, leave at 100%. If it's a mixed personal/business or purely personal expense, adjust accordingly."
-        )
-        
-        exp_date = st.date_input("Expense Date", value=date.today())
-        
-        if st.button("Process Receipt & Save Write-off", type="primary"):
-            if exp_desc:
-                # Calculate deductible cost based on Business Use % and IRS Rules (e.g. 50% for meals)
-                base_deductible = exp_cost * (business_percentage / 100.0)
-                if "50%" in category:
-                    deductible_amount = base_deductible * 0.50
-                else:
-                    deductible_amount = base_deductible
-                
-                img_b64 = None
-                if receipt_file is not None:
-                    img_bytes = receipt_file.read()
-                    img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-                
-                st.session_state.data["expenses"].append({
-                    "date": str(exp_date),
-                    "description": exp_desc,
-                    "category": category,
-                    "cost": deductible_amount,
-                    "raw_cost": exp_cost,
-                    "business_percentage": business_percentage,
-                    "receipt_img_b64": img_b64
-                })
-                save_data(st.session_state.data)
-                st.success(f"Successfully processed receipt! Tax write-off logged: -${deductible_amount:,.2f} ({business_percentage}% business use).")
-                st.balloons()
+    # Initialize session state for OCR auto-filled values if not present
+    if "ocr_scanned_cost" not in st.session_state:
+        st.session_state.ocr_scanned_cost = 0.0
+
+    receipt_file = st.file_uploader("Snap or Upload Receipt Photo for OCR Scanner", type=["png", "jpg", "jpeg"])
+    
+    scanned_text = ""
+    detected_amount = 0.0
+    
+    if receipt_file is not None:
+        if st.button("🔍 Run AI OCR Scan on Receipt"):
+            with st.spinner("Scanning receipt pixels for text and totals..."):
+                scanned_text, detected_amount = scan_receipt_with_ocr(receipt_file)
+                st.session_state.ocr_scanned_cost = detected_amount
+                st.success(f"OCR Scan Complete! Auto-detected total: ${detected_amount:,.2f}")
+                if scanned_text:
+                    with st.expander("View Raw OCR Scanned Text"):
+                        st.text(scanned_text)
+
+    exp_desc = st.text_input("Merchant / Expense Description (e.g., Staples Printer Ink)")
+    
+    suggested_index = auto_categorize_expense(exp_desc) if exp_desc else 12
+    category = st.selectbox("Schedule C Category (Auto-Suggested)", SCHEDULE_C_CATEGORIES, index=suggested_index)
+    
+    # Use OCR detected amount as default if available
+    exp_cost = st.number_input("Total Receipt Amount Paid ($)", min_value=0.0, value=st.session_state.ocr_scanned_cost, step=10.0, format="%.2f")
+    
+    business_percentage = st.slider(
+        "Business Use Percentage (%) — Move to 0% if personal!", 
+        min_value=0, max_value=100, value=100, step=5
+    )
+    
+    exp_date = st.date_input("Expense Date", value=date.today())
+    
+    if st.button("Save Scanned Expense & Write-off", type="primary"):
+        if exp_desc:
+            base_deductible = exp_cost * (business_percentage / 100.0)
+            if "50%" in category:
+                deductible_amount = base_deductible * 0.50
             else:
-                st.warning("Please enter an expense description or merchant name.")
+                deductible_amount = base_deductible
+            
+            img_b64 = None
+            if receipt_file is not None:
+                # Reset file pointer and read bytes for base64 storage
+                receipt_file.seek(0)
+                img_bytes = receipt_file.read()
+                img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+            
+            st.session_state.data["expenses"].append({
+                "date": str(exp_date),
+                "description": exp_desc,
+                "category": category,
+                "cost": deductible_amount,
+                "raw_cost": exp_cost,
+                "business_percentage": business_percentage,
+                "receipt_img_b64": img_b64
+            })
+            save_data(st.session_state.data)
+            st.success(f"Successfully processed receipt! Tax write-off logged: -${deductible_amount:,.2f} ({business_percentage}% business use).")
+            st.session_state.ocr_scanned_cost = 0.0
+            st.balloons()
+        else:
+            st.warning("Please enter an expense description or merchant name.")
 
 # --- VIEW 4: IMPORT BANK CSV ---
 elif action == "Import Bank CSV":
