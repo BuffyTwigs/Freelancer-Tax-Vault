@@ -1,18 +1,7 @@
-#this script simulates a freelancer getting paid for a job, calculating what percentages need to be set aside 
-#for self-employment tax and federal income tax, and tracking the total balance in their tax bucket
-#V14 - Full file with CSV bank statement bulk importer integrated
-
-#this script simulates a freelancer getting paid for a job, calculating what percentages need to be set aside 
-#for self-employment tax, emergency savings, retirement, and tracking the total balances in their financial vaults
-#V13 - Multi-bucket allocations (Taxes, Savings, Retirement) & Schedule C Category rules integrated
 
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#and generating itemized receipts for every individual client payment
-#V16 - Itemized Payment Receipts & Multi-Bucket Vault integrated
-
-#this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#generating itemized receipts, and categorizing expenses by official IRS Schedule C lines
-#V15 - Full Schedule C Expense Categories & Smart CSV Auto-Tagging
+#generating itemized receipts, categorizing expenses by official IRS Schedule C lines, and attaching receipt photos
+#V16 - Full Schedule C Categories & Receipt Photo Uploader
 
 import streamlit as st
 from datetime import date
@@ -43,8 +32,9 @@ for item in earnings_list:
 
 for item in expenses_list:
     item.setdefault("date", str(date.today()))
-    item.setdefault("category", "Other / General Business (100%)")
+    item.setdefault("category", "Other / General Business (Line 27a) - 100%")
     item.setdefault("raw_cost", item.get("cost", 0.0))
+    item.setdefault("receipt", "No")
 
 # Official IRS Schedule C Categories
 SCHEDULE_C_CATEGORIES = [
@@ -215,6 +205,10 @@ elif action == "Log Business Expense":
         exp_desc = st.text_input("Expense Description (e.g., Adobe Subscription, Client Lunch)")
         exp_cost = st.number_input("Total Cost Paid ($)", min_value=0.0, step=10.0, format="%.2f")
         category = st.selectbox("Schedule C Expense Category", SCHEDULE_C_CATEGORIES)
+        
+        # Receipt photo uploader field inside form
+        receipt_file = st.file_uploader("Attach Receipt Photo (Optional)", type=["png", "jpg", "jpeg"])
+        
         exp_date = st.date_input("Expense Date", value=date.today())
         exp_submitted = st.form_submit_button("Save Expense")
         
@@ -225,12 +219,15 @@ elif action == "Log Business Expense":
                 else:
                     deductible_amount = exp_cost
                 
+                has_receipt = "Yes 📎" if receipt_file is not None else "No"
+                
                 st.session_state.data["expenses"].append({
                     "date": str(exp_date),
                     "description": exp_desc,
                     "category": category,
                     "cost": deductible_amount,
-                    "raw_cost": exp_cost
+                    "raw_cost": exp_cost,
+                    "receipt": has_receipt
                 })
                 save_data(st.session_state.data)
                 st.success(f"Successfully logged: {exp_desc} (-${deductible_amount:,.2f} tax deduction under {category})!")
@@ -294,7 +291,8 @@ elif action == "Import Bank CSV":
                             "description": tx_desc,
                             "category": cat_label,
                             "cost": cost_val * ded_rate,
-                            "raw_cost": cost_val
+                            "raw_cost": cost_val,
+                            "receipt": "Imported CSV"
                         })
                         imported_count += 1
                 except Exception:
