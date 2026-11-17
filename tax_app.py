@@ -1,6 +1,6 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
 #itemized receipts, Schedule C categories, base64 receipt photos, multi-user login, registration, password recovery, and account settings
-#V26.2 - Fully Assembled Multi-User Vault App
+#V26.3 - Fully Assembled Multi-User Vault App
 
 import streamlit as st
 from datetime import date
@@ -230,34 +230,34 @@ if action == "Dashboard (Vault View)":
     st.subheader(f"📊 Financial Wealth & Vault Snapshot ({current_user})")
     
     col1, col2, col3 = st.columns(3)
-    col1.metric("Gross Revenue", f"\${total_earned:,.2f}")
-    col2.metric("🔒 Tax Vault", f"\${tax_bucket:,.2f}", delta="Auto-locked")
-    col3.metric("💵 Spendable Cash", f"\${spending_money:,.2f}")
+    col1.metric("Gross Revenue", f"${total_earned:,.2f}")
+    col2.metric("🔒 Tax Vault", f"${tax_bucket:,.2f}", delta="Auto-locked")
+    col3.metric("💵 Spendable Cash", f"${spending_money:,.2f}")
 
     st.write("---")
     col4, col5 = st.columns(2)
-    col4.metric("💰 Emergency Savings", f"\${savings_bucket:,.2f}")
-    col5.metric("🌱 Retirement / Roth IRA", f"\${retirement_bucket:,.2f}")
+    col4.metric("💰 Emergency Savings", f"${savings_bucket:,.2f}")
+    col5.metric("🌱 Retirement / Roth IRA", f"${retirement_bucket:,.2f}")
 
     st.write("---")
     col6, col7 = st.columns(2)
-    col6.metric("Business Write-offs", f"\${total_exp:,.2f}")
-    col7.metric("Estimated Net Profit", f"\${taxable_profit:,.2f}")
+    col6.metric("Business Write-offs", f"${total_exp:,.2f}")
+    col7.metric("Estimated Net Profit", f"${taxable_profit:,.2f}")
 
     st.write("### 🧾 Itemized Client Payment Receipts")
     if earnings_list:
         for i, item in enumerate(reversed(earnings_list)):
-            with st.expander(f"📁 Payment #{len(earnings_list) - i} | {item['client']} — \${item['amount']:,.2f} ({item['date']})"):
+            with st.expander(f"📁 Payment #{len(earnings_list) - i} | {item['client']} — ${item['amount']:,.2f} ({item['date']})"):
                 rc1, rc2 = st.columns(2)
                 rc1.write(f"**Date Received:** {item['date']}")
                 rc1.write(f"**Client Name:** {item['client']}")
-                rc1.metric("Gross Payment", f"\${item['amount']:,.2f}")
+                rc1.metric("Gross Payment", f"${item['amount']:,.2f}")
                 
                 rc2.write("**Vault Allocations Stamped on Receipt:**")
-                rc2.write(f"🔒 Tax Allocation: **\${item.get('tax_alloc', 0.0):,.2f}**")
-                rc2.write(f"💰 Savings Allocation: **\${item.get('savings_alloc', 0.0):,.2f}**")
-                rc2.write(f"🌱 Retirement Allocation: **\${item.get('retirement_alloc', 0.0):,.2f}**")
-                rc2.write(f"💵 Spendable Portion: **\${item.get('spend_alloc', 0.0):,.2f}**")
+                rc2.write(f"🔒 Tax Allocation: **${item.get('tax_alloc', 0.0):,.2f}**")
+                rc2.write(f"💰 Savings Allocation: **${item.get('savings_alloc', 0.0):,.2f}**")
+                rc2.write(f"🌱 Retirement Allocation: **${item.get('retirement_alloc', 0.0):,.2f}**")
+                rc2.write(f"💵 Spendable Portion: **${item.get('spend_alloc', 0.0):,.2f}**")
     else:
         st.info("No client payment receipts logged yet.")
 
@@ -266,13 +266,13 @@ if action == "Dashboard (Vault View)":
         for i, exp in enumerate(reversed(expenses_list)):
             bus_pct = exp.get("business_percentage", 100)
             status_icon = "🟢 Business" if bus_pct > 0 else "🔴 Personal (Ignored)"
-            with st.expander(f"🧾 Expense #{len(expenses_list) - i} | {exp['description']} — \${exp['cost']:,.2f} ({status_icon})"):
+            with st.expander(f"🧾 Expense #{len(expenses_list) - i} | {exp['description']} — ${exp['cost']:,.2f} ({status_icon})"):
                 ec1, ec2 = st.columns(2)
                 ec1.write(f"**Date:** {exp['date']}")
                 ec1.write(f"**Description:** {exp['description']}")
                 ec1.write(f"**Primary Category:** {exp['category']}")
                 ec1.write(f"**Business Use:** {bus_pct}%")
-                ec1.write(f"**Tax-Deductible Total:** \${exp['cost']:,.2f}")
+                ec1.write(f"**Tax-Deductible Total:** ${exp['cost']:,.2f}")
                 
                 if ec2.button("Delete Expense", key=f"del_exp_{i}"):
                     expenses_list.remove(exp)
@@ -300,7 +300,7 @@ elif action == "Log Client Payment":
     st.subheader("💰 Log Incoming Client Payment")
     with st.form("payment_form"):
         client_name = st.text_input("Client Name (e.g., Acme Corp)")
-        payment_amount = st.number_input("Payment Amount (\$)", min_value=0.0, step=50.0, format="%.2f")
+        payment_amount = st.number_input("Payment Amount ($)", min_value=0.0, step=50.0, format="%.2f")
         payment_date = st.date_input("Date Received", value=date.today())
         submitted = st.form_submit_button("Deposit & Generate Receipt")
         
@@ -322,7 +322,7 @@ elif action == "Log Client Payment":
                 })
                 save_vault_db()
                 
-                st.success(f"Generated Itemized Receipt for \${payment_amount:,.2f} from {client_name}!")
+                st.success(f"Generated Itemized Receipt for ${payment_amount:,.2f} from {client_name}!")
                 st.balloons()
             else:
                 st.warning("Please enter a client name.")
@@ -337,7 +337,7 @@ elif action == "Log Business Expense":
     suggested_index = auto_categorize_expense(exp_desc) if exp_desc else 12
     category = st.selectbox("Primary Schedule C Category", SCHEDULE_C_CATEGORIES, index=suggested_index)
     
-    exp_cost = st.number_input("Total Receipt Amount Paid (\$)", min_value=0.0, step=10.0, format="%.2f")
+    exp_cost = st.number_input("Total Receipt Amount Paid ($)", min_value=0.0, step=10.0, format="%.2f")
     
     business_percentage = st.slider("Business Use Percentage (%)", min_value=0, max_value=100, value=100, step=5)
     
@@ -352,14 +352,14 @@ elif action == "Log Business Expense":
             with cols[0]:
                 it_name = st.text_input(f"Item #{idx+1} Name", key=f"it_name_{idx}")
             with cols[1]:
-                it_price = st.number_input(f"Price (\$)", min_value=0.0, step=1.0, key=f"it_price_{idx}")
+                it_price = st.number_input(f"Price ($)", min_value=0.0, step=1.0, key=f"it_price_{idx}")
             with cols[2]:
                 it_cat = st.selectbox(f"Category", SCHEDULE_C_CATEGORIES, key=f"it_cat_{idx}")
             
             if it_name:
                 itemized_list.append({
                     "Item": it_name,
-                    "Price": f"\${it_price:,.2f}",
+                    "Price": f"${it_price:,.2f}",
                     "Category": it_cat.split(" - ")[0]
                 })
 
@@ -390,7 +390,7 @@ elif action == "Log Business Expense":
                 "receipt_img_b64": img_b64
             })
             save_vault_db()
-            st.success(f"Successfully logged itemized expense! Tax write-off: -\${deductible_amount:,.2f}.")
+            st.success(f"Successfully logged itemized expense! Tax write-off: -${deductible_amount:,.2f}.")
             st.balloons()
         else:
             st.warning("Please enter an overall expense description or merchant name.")
@@ -409,7 +409,7 @@ elif action == "Import Bank CSV":
         with col2:
             desc_col = st.selectbox("Description / Client Column", df.columns)
         with col3:
-            amount_col = st.selectbox("Amount Column (\$)", df.columns)
+            amount_col = st.selectbox("Amount Column ($)", df.columns)
             
         import_type = st.radio("Are these mostly Income or Expenses?", ["Income (Client Payments)", "Expenses (Write-offs)"])
         
@@ -417,7 +417,7 @@ elif action == "Import Bank CSV":
             imported_count = 0
             for _, row in df.iterrows():
                 try:
-                    raw_amt = str(row[amount_col]).replace("\$", "").replace(",", "").strip()
+                    raw_amt = str(row[amount_col]).replace("$", "").replace(",", "").strip()
                     amt = float(raw_amt)
                     if amt == 0:
                         continue
@@ -440,4 +440,86 @@ elif action == "Import Bank CSV":
                             "spend_alloc": sp_alloc
                         })
                         imported_count += 1
-                    elif import_type == "Expenses (Write-offs
+                    elif import_type == "Expenses (Write-offs)":
+                        cost_val = abs(amt)
+                        suggested_idx = auto_categorize_expense(tx_desc)
+                        cat_label = SCHEDULE_C_CATEGORIES[suggested_idx]
+                        ded_rate = 0.50 if "50%" in cat_label else 1.0
+                        
+                        expenses_list.append({
+                            "date": tx_date,
+                            "description": tx_desc,
+                            "category": cat_label,
+                            "cost": cost_val * ded_rate,
+                            "raw_cost": cost_val,
+                            "business_percentage": 100,
+                            "itemized_items": [],
+                            "receipt_img_b64": None
+                        })
+                        imported_count += 1
+                except Exception:
+                    continue
+            
+            save_vault_db()
+            st.success(f"Successfully imported {imported_count} transactions!")
+            st.balloons()
+
+elif action == "Quarterly Tax Report & PDF Export":
+    st.subheader("📑 Schedule SE, Schedule C, & 1040-ES PDF Report Generator")
+    
+    st.warning(
+        "⚠️ **DISCLAIMER:** This software calculates estimated Self-Employment (Schedule SE) and Income taxes "
+        "for organizational purposes only. Always consult a certified CPA before filing."
+    )
+    
+    se_tax_est = (taxable_profit * 0.9235 * 0.153) if taxable_profit > 400 else 0.0
+    half_se = se_tax_est / 2.0
+    income_tax_est = max(0.0, taxable_profit - half_se) * tax_rate
+    total_tax_est = se_tax_est + income_tax_est
+    quarterly_est = total_tax_est / 4.0 if total_tax_est > 0 else 0.0
+    
+    col1, col2 = st.columns(2)
+    col1.metric("Est. Self-Employment Tax (SE)", f"${se_tax_est:,.2f}")
+    col2.metric("Est. Total Combined Tax", f"${total_tax_est:,.2f}")
+    
+    st.info(f"**Suggested Quarterly Payment (Form 1040-ES):** ${quarterly_est:,.2f} per quarter")
+    
+    st.write("---")
+    st.subheader("📥 Download Professional Tax Packet")
+    
+    pdf_bytes = generate_pdf_report(
+        total_earned, total_exp, taxable_profit, tax_rate_percent, 
+        business_code, business_desc, earnings_list, expenses_list
+    )
+    
+    st.download_button(
+        label="📥 Download Professional Tax Packet (.pdf)",
+        data=pdf_bytes,
+        file_name="Freelancer_Complete_Tax_Packet.pdf",
+        type="primary",
+        mime="application/pdf",
+        key="download_pdf_report"
+    )
+
+elif action == "🔒 Account Settings & Security":
+    st.subheader("🔒 Account Settings & Security Management")
+    st.write(f"Currently logged in as: **{current_user}**")
+    
+    st.write("---")
+    st.subheader("Update Password or Recovery PIN")
+    
+    with st.form("update_creds_form"):
+        current_pass_input = st.text_input("Current Password", type="password")
+        new_pass_input = st.text_input("New Password (Leave blank to keep current)", type="password")
+        new_recovery_input = st.text_input("New Secret Recovery Word/PIN", value=user_data.get("recovery_word", "recovery"))
+        update_btn = st.form_submit_button("Update Account Credentials", type="primary")
+        
+        if update_btn:
+            if current_pass_input == user_data["password"]:
+                if new_pass_input:
+                    user_data["password"] = new_pass_input
+                user_data["recovery_word"] = new_recovery_input.strip().lower()
+                save_vault_db()
+                st.success("Account credentials updated successfully!")
+            else:
+                st.error("Current password is incorrect.")
