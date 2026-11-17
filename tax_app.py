@@ -1,6 +1,6 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#itemized receipts, Schedule C categories, base64 receipt photos, fixed Tesseract OCR path, and itemized line-item tables
-#V21 - Fixed Cloud OCR & Itemized Receipt Line-Items
+#itemized receipts, Schedule C categories, base64 receipt photos, visible OCR scan button, and itemized line-item tables
+#V22 - Visible OCR Scan Button & Itemized Line-Items
 
 import streamlit as st
 from datetime import date
@@ -16,7 +16,7 @@ from pdf_generator import generate_pdf_report
 st.set_page_config(page_title="Freelancer Tax & Wealth Vault", page_icon="🏦", layout="centered")
 
 st.title("🏦 Freelancer Tax Vault & Wealth Dashboard")
-st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized receipts, and Itemized OCR Line-Item Breakdown.")
+st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized receipts, and AI Receipt OCR Scanner.")
 
 # Load saved data into session state
 if "data" not in st.session_state:
@@ -81,9 +81,7 @@ def auto_categorize_expense(description):
 def scan_receipt_with_ocr(image_file):
     """Uses Tesseract OCR with explicit Linux path binding to extract text and totals."""
     try:
-        # Explicit path binding for Streamlit Cloud Linux environment
         pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
-        
         img = Image.open(image_file)
         raw_text = pytesseract.image_to_string(img)
         
@@ -192,7 +190,6 @@ if action == "Dashboard (Vault View)":
                     save_data(st.session_state.data)
                     st.rerun()
 
-                # Show itemized line-items if present
                 itemized = exp.get("itemized_items", [])
                 if itemized:
                     st.write("---")
@@ -249,10 +246,11 @@ elif action == "Log Business Expense":
     if "ocr_scanned_cost" not in st.session_state:
         st.session_state.ocr_scanned_cost = 0.0
 
-    receipt_file = st.file_uploader("Snap or Upload Receipt Photo for OCR Scanner", type=["png", "jpg", "jpeg"])
+    receipt_file = st.file_uploader("1. Snap or Upload Receipt Photo", type=["png", "jpg", "jpeg"])
     
+    # VISIBLE SCAN BUTTON RIGHT UNDER UPLOADER
     if receipt_file is not None:
-        if st.button("🔍 Run AI OCR Scan on Receipt"):
+        if st.button("🔍 CLICK HERE TO RUN AI OCR SCAN ON RECEIPT", type="primary"):
             with st.spinner("Scanning receipt pixels and extracting total amount..."):
                 scanned_text, detected_amount = scan_receipt_with_ocr(receipt_file)
                 st.session_state.ocr_scanned_cost = detected_amount
@@ -276,11 +274,8 @@ elif action == "Log Business Expense":
         min_value=0, max_value=100, value=100, step=5
     )
     
-    # NEW: Itemized Line-Items Builder
     st.write("---")
-    st.write("🛒 **Optional: Itemize Individual Receipt Items & Prices**")
-    st.write("Break down what was bought so you have line-item clarity for your records.")
-    
+    st.write("🛒 **Itemized Receipt Line-Items (Optional)**")
     num_items = st.number_input("How many individual line items to itemize?", min_value=0, max_value=10, value=0, step=1)
     
     itemized_list = []
@@ -303,7 +298,7 @@ elif action == "Log Business Expense":
 
     exp_date = st.date_input("Expense Date", value=date.today())
     
-    if st.button("Save Itemized Expense & Write-off", type="primary"):
+    if st.button("Save Itemized Expense & Write-off", type="secondary"):
         if exp_desc:
             base_deductible = exp_cost * (business_percentage / 100.0)
             if "50%" in category:
