@@ -8,7 +8,11 @@
 
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
 #and generating itemized receipts for every individual client payment
-#V15 - Itemized Payment Receipts & Multi-Bucket Vault integrated
+#V16 - Itemized Payment Receipts & Multi-Bucket Vault integrated
+
+#this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
+#generating itemized receipts, and categorizing expenses by official IRS Schedule C lines
+#V15 - Full Schedule C Expense Categories & Smart CSV Auto-Tagging
 
 import streamlit as st
 from datetime import date
@@ -20,7 +24,7 @@ from pdf_generator import generate_pdf_report
 st.set_page_config(page_title="Freelancer Tax & Wealth Vault", page_icon="🏦", layout="centered")
 
 st.title("🏦 Freelancer Tax Vault & Wealth Dashboard")
-st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized payment receipts, and PDF tax packet generator.")
+st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized payment receipts, and Schedule C PDF generator.")
 
 # Load saved data into session state
 if "data" not in st.session_state:
@@ -29,7 +33,7 @@ if "data" not in st.session_state:
 earnings_list = st.session_state.data["earnings"]
 expenses_list = st.session_state.data["expenses"]
 
-# Ensure backwards compatibility for older data structures without allocation fields
+# Ensure backwards compatibility for older data structures
 for item in earnings_list:
     item.setdefault("date", str(date.today()))
     item.setdefault("tax_alloc", item.get("amount", 0.0) * 0.25)
@@ -39,8 +43,45 @@ for item in earnings_list:
 
 for item in expenses_list:
     item.setdefault("date", str(date.today()))
-    item.setdefault("category", "General Business / 100% Write-off")
+    item.setdefault("category", "Other / General Business (100%)")
     item.setdefault("raw_cost", item.get("cost", 0.0))
+
+# Official IRS Schedule C Categories
+SCHEDULE_C_CATEGORIES = [
+    "Advertising & Marketing (Line 8) - 100%",
+    "Car & Truck / Gas & Mileage (Line 9) - 100%",
+    "Contract Labor (Line 11) - 100%",
+    "Insurance / Business (Line 15) - 100%",
+    "Legal & Professional Services (Line 17) - 100%",
+    "Office Expenses & Software (Line 18) - 100%",
+    "Rent / Equipment & Workspace (Line 20) - 100%",
+    "Repairs & Maintenance (Line 21) - 100%",
+    "Supplies & Tools (Line 22) - 100%",
+    "Travel / Flights & Lodging (Line 24a) - 100%",
+    "Business Meals (Line 24b) - 50% IRS Limit",
+    "Utilities / Internet & Phone (Line 25) - 100%",
+    "Other / General Business (Line 27a) - 100%"
+]
+
+def auto_categorize_csv_expense(description):
+    """Scans raw bank transaction text to assign a matching Schedule C category and deduction rate."""
+    desc_upper = description.upper()
+    if any(k in desc_upper for k in ["META", "GOOGLE ADS", "FACEBOOK", "TIKTOK", "PRINT", "FLYER"]):
+        return "Advertising & Marketing (Line 8) - 100%", 1.0
+    elif any(k in desc_upper for k in ["SHELL", "CHEVRON", "EXXON", "ARCO", "GAS", "UBER", "LYFT", "AUTOZONE"]):
+        return "Car & Truck / Gas & Mileage (Line 9) - 100%", 1.0
+    elif any(k in desc_upper for k in ["ADOBE", "AWS", "GITHUB", "MICROSOFT", "APPLE", "ZOOM", "OPENAI", "CHATGPT", "STAPLES"]):
+        return "Office Expenses & Software (Line 18) - 100%", 1.0
+    elif any(k in desc_upper for k in ["HOME DEPOT", "LOWES", "HARBOR FREIGHT", "AMAZON", "BEST BUY"]):
+        return "Supplies & Tools (Line 22) - 100%", 1.0
+    elif any(k in desc_upper for k in ["AIRLINE", "DELTA", "UNITED", "HOTEL", "AIRBNB", "MARRIOTT"]):
+        return "Travel / Flights & Lodging (Line 24a) - 100%", 1.0
+    elif any(k in desc_upper for k in ["STARBUCKS", "MCDONALDS", "CHIPOTLE", "RESTAURANT", "CAFE", "DOORDASH", "GRUBHUB"]):
+        return "Business Meals (Line 24b) - 50% IRS Limit", 0.50
+    elif any(k in desc_upper for k in ["VERIZON", "AT&T", "TMOBILE", "COMCAST", "XFINITY", "PG&E", "INTERNET"]):
+        return "Utilities / Internet & Phone (Line 25) - 100%", 1.0
+    else:
+        return "Other / General Business (Line 27a) - 100%", 1.0
 
 # --- SIDEBAR: SETTINGS & ALLOCATIONS ---
 st.sidebar.header("⚙️ Multi-Bucket & Tax Settings")
@@ -78,7 +119,6 @@ if st.sidebar.button("🔄 Reset Vault & Clear All Data", type="secondary"):
 total_earned = sum(item["amount"] for item in earnings_list)
 total_exp = sum(item["cost"] for item in expenses_list)
 
-# Total accumulated across vaults from individual stamped receipts
 tax_bucket = sum(item.get("tax_alloc", item["amount"] * tax_rate) for item in earnings_list)
 savings_bucket = sum(item.get("savings_alloc", item["amount"] * savings_rate) for item in earnings_list)
 retirement_bucket = sum(item.get("retirement_alloc", item["amount"] * retirement_rate) for item in earnings_list)
@@ -174,12 +214,7 @@ elif action == "Log Business Expense":
     with st.form("expense_form"):
         exp_desc = st.text_input("Expense Description (e.g., Adobe Subscription, Client Lunch)")
         exp_cost = st.number_input("Total Cost Paid ($)", min_value=0.0, step=10.0, format="%.2f")
-        
-        category = st.selectbox("Schedule C Expense Category", [
-            "General Business / 100% Write-off (Software, Tools, Supplies, Advertising)",
-            "Business Meals / 50% IRS Deductible Limit"
-        ])
-        
+        category = st.selectbox("Schedule C Expense Category", SCHEDULE_C_CATEGORIES)
         exp_date = st.date_input("Expense Date", value=date.today())
         exp_submitted = st.form_submit_button("Save Expense")
         
@@ -187,20 +222,18 @@ elif action == "Log Business Expense":
             if exp_desc:
                 if "50%" in category:
                     deductible_amount = exp_cost * 0.50
-                    cat_label = "Business Meals (50% Rule)"
                 else:
                     deductible_amount = exp_cost
-                    cat_label = "General Business (100%)"
                 
                 st.session_state.data["expenses"].append({
                     "date": str(exp_date),
                     "description": exp_desc,
-                    "category": cat_label,
+                    "category": category,
                     "cost": deductible_amount,
                     "raw_cost": exp_cost
                 })
                 save_data(st.session_state.data)
-                st.success(f"Successfully logged: {exp_desc} (-${deductible_amount:,.2f} tax deduction applied)!")
+                st.success(f"Successfully logged: {exp_desc} (-${deductible_amount:,.2f} tax deduction under {category})!")
             else:
                 st.warning("Please enter an expense description.")
 
@@ -255,11 +288,12 @@ elif action == "Import Bank CSV":
                         imported_count += 1
                     elif import_type == "Expenses (Write-offs)":
                         cost_val = abs(amt)
+                        cat_label, ded_rate = auto_categorize_csv_expense(tx_desc)
                         st.session_state.data["expenses"].append({
                             "date": tx_date,
                             "description": tx_desc,
-                            "category": "Imported CSV Expense",
-                            "cost": cost_val,
+                            "category": cat_label,
+                            "cost": cost_val * ded_rate,
                             "raw_cost": cost_val
                         })
                         imported_count += 1
@@ -267,7 +301,7 @@ elif action == "Import Bank CSV":
                     continue
             
             save_data(st.session_state.data)
-            st.success(f"Successfully imported {imported_count} transactions and generated receipts!")
+            st.success(f"Successfully imported {imported_count} transactions with automatic Schedule C categorization!")
             st.balloons()
 
 # --- VIEW 5: QUARTERLY TAX REPORT & PDF EXPORT ---
