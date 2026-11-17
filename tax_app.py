@@ -1,7 +1,7 @@
 
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#generating itemized receipts, categorizing expenses by official IRS Schedule C lines, and attaching receipt photos
-#V16 - Full Schedule C Categories & Receipt Photo Uploader
+#generating itemized receipts, categorizing expenses by official IRS Schedule C lines, and previewing receipt photos
+#V17 - Receipt Photo Previewer & Schedule C Categorizer
 
 import streamlit as st
 from datetime import date
@@ -34,7 +34,7 @@ for item in expenses_list:
     item.setdefault("date", str(date.today()))
     item.setdefault("category", "Other / General Business (Line 27a) - 100%")
     item.setdefault("raw_cost", item.get("cost", 0.0))
-    item.setdefault("receipt", "No")
+    item.setdefault("receipt_img", None)
 
 # Official IRS Schedule C Categories
 SCHEDULE_C_CATEGORIES = [
@@ -136,11 +136,9 @@ if action == "Dashboard (Vault View)":
     col7.metric("Estimated Net Profit", f"${taxable_profit:,.2f}")
 
     st.write("### 🧾 Itemized Client Payment Receipts")
-    st.write("Click on any payment receipt below to inspect its exact multi-bucket breakdown.")
-    
     if earnings_list:
         for i, item in enumerate(reversed(earnings_list)):
-            with st.expander(f"📁 Receipt #{len(earnings_list) - i} | {item['client']} — ${item['amount']:,.2f} ({item['date']})"):
+            with st.expander(f"📁 Payment #{len(earnings_list) - i} | {item['client']} — ${item['amount']:,.2f} ({item['date']})"):
                 rc1, rc2 = st.columns(2)
                 rc1.write(f"**Date Received:** {item['date']}")
                 rc1.write(f"**Client Name:** {item['client']}")
@@ -154,11 +152,30 @@ if action == "Dashboard (Vault View)":
     else:
         st.info("No client payment receipts logged yet.")
 
-    st.write("### 🧾 Business Expense Write-offs")
+    st.write("### 🧾 Business Expense Write-offs & Receipt Photos")
     if expenses_list:
-        st.dataframe(expenses_list, use_container_width=True)
+        for i, exp in enumerate(reversed(expenses_list)):
+            with st.expander(f"🧾 Expense #{len(expenses_list) - i} | {exp['description']} — ${exp['cost']:,.2f} ({exp['date']})"):
+                ec1, ec2 = st.columns(2)
+                ec1.write(f"**Date:** {exp['date']}")
+                ec1.write(f"**Description:** {exp['description']}")
+                ec1.write(f"**Category:** {exp['category']}")
+                ec1.write(f"**Deductible Amount:** ${exp['cost']:,.2f}")
+                
+                if ec2.button("Delete Expense", key=f"del_exp_{i}"):
+                    expenses_list.remove(exp)
+                    save_data(st.session_state.data)
+                    st.rerun()
+
+                # Display attached receipt photo if one was uploaded
+                if exp.get("receipt_img") is not None:
+                    st.write("---")
+                    st.write("📎 **Attached Receipt Photo:**")
+                    st.image(exp["receipt_img"], caption=exp['description'], use_container_width=True)
+                else:
+                    st.write("*(No receipt photo attached to this expense)*")
     else:
-        st.info("No expenses logged yet.")
+        st.info("No business expenses logged yet.")
 
 # --- VIEW 2: LOG CLIENT PAYMENT ---
 elif action == "Log Client Payment":
@@ -201,25 +218,28 @@ elif action == "Log Client Payment":
 # --- VIEW 3: LOG EXPENSE ---
 elif action == "Log Business Expense":
     st.subheader("🧾 Log Business Expense (Schedule C Write-off)")
-    with st.form("expense_form"):
+    
+    # Note: st.file_uploader cannot live inside a st.form block in Streamlit, 
+    # so we handle the expense form directly outside a strict form container.
+    with st.container():
         exp_desc = st.text_input("Expense Description (e.g., Adobe Subscription, Client Lunch)")
         exp_cost = st.number_input("Total Cost Paid ($)", min_value=0.0, step=10.0, format="%.2f")
         category = st.selectbox("Schedule C Expense Category", SCHEDULE_C_CATEGORIES)
         
-        # Receipt photo uploader field inside form
-        receipt_file = st.file_uploader("Attach Receipt Photo (Optional)", type=["png", "jpg", "jpeg"])
+        # Receipt photo uploader (placed outside form so image bytes can be read live)
+        receipt_file = st.file_uploader("Attach Receipt Photo / Snap Picture", type=["png", "jpg", "jpeg"])
         
         exp_date = st.date_input("Expense Date", value=date.today())
-        exp_submitted = st.form_submit_button("Save Expense")
         
-        if exp_submitted:
+        if st.button("Save Expense & Attach Receipt", type="primary"):
             if exp_desc:
                 if "50%" in category:
                     deductible_amount = exp_cost * 0.50
                 else:
                     deductible_amount = exp_cost
                 
-                has_receipt = "Yes 📎" if receipt_file is not None else "No"
+                # Read uploaded image bytes if present
+                img_bytes = receipt_file.read() if receipt_file is not None else None
                 
                 st.session_state.data["expenses"].append({
                     "date": str(exp_date),
@@ -227,10 +247,11 @@ elif action == "Log Business Expense":
                     "category": category,
                     "cost": deductible_amount,
                     "raw_cost": exp_cost,
-                    "receipt": has_receipt
+                    "receipt_img": img_bytes
                 })
                 save_data(st.session_state.data)
                 st.success(f"Successfully logged: {exp_desc} (-${deductible_amount:,.2f} tax deduction under {category})!")
+                st.balloons()
             else:
                 st.warning("Please enter an expense description.")
 
@@ -292,7 +313,7 @@ elif action == "Import Bank CSV":
                             "category": cat_label,
                             "cost": cost_val * ded_rate,
                             "raw_cost": cost_val,
-                            "receipt": "Imported CSV"
+                            "receipt_img": None
                         })
                         imported_count += 1
                 except Exception:
