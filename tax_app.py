@@ -1,6 +1,6 @@
 #this script simulates a freelancer getting paid for a job, calculating tax, savings, and retirement splits, 
-#itemized receipts, Schedule C categories, base64 receipt photos, and free Tesseract OCR receipt scanning
-#V20 - Free Tesseract OCR Receipt Scanner & Smart Expense Splitter
+#itemized receipts, Schedule C categories, base64 receipt photos, fixed Tesseract OCR path, and itemized line-item tables
+#V21 - Fixed Cloud OCR & Itemized Receipt Line-Items
 
 import streamlit as st
 from datetime import date
@@ -16,7 +16,7 @@ from pdf_generator import generate_pdf_report
 st.set_page_config(page_title="Freelancer Tax & Wealth Vault", page_icon="🏦", layout="centered")
 
 st.title("🏦 Freelancer Tax Vault & Wealth Dashboard")
-st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized receipts, and AI Receipt OCR Scanner.")
+st.write("Automated tax sub-accounts, multi-bucket savings splits, itemized receipts, and Itemized OCR Line-Item Breakdown.")
 
 # Load saved data into session state
 if "data" not in st.session_state:
@@ -38,6 +38,7 @@ for item in expenses_list:
     item.setdefault("category", "Other / General Business (Line 27a) - 100%")
     item.setdefault("raw_cost", item.get("cost", 0.0))
     item.setdefault("business_percentage", 100)
+    item.setdefault("itemized_items", [])
     item.setdefault("receipt_img_b64", None)
 
 # Official IRS Schedule C Categories
@@ -58,7 +59,7 @@ SCHEDULE_C_CATEGORIES = [
 ]
 
 def auto_categorize_expense(description):
-    """Scans merchant text to auto-suggest a Schedule C category."""
+    """Scans merchant text to auto-suggest a Schedule C category index."""
     desc_upper = description.upper()
     if any(k in desc_upper for k in ["META", "GOOGLE ADS", "FACEBOOK", "PRINT", "FLYER"]):
         return 0 
@@ -78,19 +79,21 @@ def auto_categorize_expense(description):
         return 12 
 
 def scan_receipt_with_ocr(image_file):
-    """Uses Tesseract OCR to extract text and find the largest dollar amount on a receipt."""
+    """Uses Tesseract OCR with explicit Linux path binding to extract text and totals."""
     try:
+        # Explicit path binding for Streamlit Cloud Linux environment
+        pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+        
         img = Image.open(image_file)
         raw_text = pytesseract.image_to_string(img)
         
-        # Search for all dollar-like amounts (e.g., 45.99, 12.00)
         amounts = re.findall(r'\b\d+\.\d{2}\b', raw_text)
         float_amounts = [float(amt) for amt in amounts]
         
         suggested_cost = max(float_amounts) if float_amounts else 0.0
         return raw_text.strip(), suggested_cost
     except Exception as e:
-        return "", 0.0
+        return f"OCR Error: {str(e)}", 0.0
 
 # --- SIDEBAR: SETTINGS & ALLOCATIONS ---
 st.sidebar.header("⚙️ Multi-Bucket & Tax Settings")
@@ -171,7 +174,7 @@ if action == "Dashboard (Vault View)":
     else:
         st.info("No client payment receipts logged yet.")
 
-    st.write("### 🧾 Business Expense Write-offs & Receipt Photos")
+    st.write("### 🧾 Business Expense Write-offs & Itemized Breakdown")
     if expenses_list:
         for i, exp in enumerate(reversed(expenses_list)):
             bus_pct = exp.get("business_percentage", 100)
@@ -180,18 +183,26 @@ if action == "Dashboard (Vault View)":
                 ec1, ec2 = st.columns(2)
                 ec1.write(f"**Date:** {exp['date']}")
                 ec1.write(f"**Description:** {exp['description']}")
-                ec1.write(f"**Category:** {exp['category']}")
+                ec1.write(f"**Primary Category:** {exp['category']}")
                 ec1.write(f"**Business Use:** {bus_pct}%")
-                ec1.write(f"**Tax-Deductible Amount:** ${exp['cost']:,.2f}")
+                ec1.write(f"**Tax-Deductible Total:** ${exp['cost']:,.2f}")
                 
                 if ec2.button("Delete Expense", key=f"del_exp_{i}"):
                     expenses_list.remove(exp)
                     save_data(st.session_state.data)
                     st.rerun()
 
+                # Show itemized line-items if present
+                itemized = exp.get("itemized_items", [])
+                if itemized:
+                    st.write("---")
+                    st.write("🛒 **Itemized Receipt Breakdown:**")
+                    item_df = pd.DataFrame(itemized)
+                    st.dataframe(item_df, use_container_width=True)
+
                 if exp.get("receipt_img_b64") is not None:
                     st.write("---")
-                    st.write("📎 **Attached Receipt Photo & OCR Data:**")
+                    st.write("📎 **Attached Receipt Photo:**")
                     img_bytes = base64.b64decode(exp["receipt_img_b64"])
                     st.image(img_bytes, caption=exp['description'], use_container_width=True)
                 else:
@@ -233,43 +244,66 @@ elif action == "Log Client Payment":
 
 # --- VIEW 3: LOG EXPENSE ---
 elif action == "Log Business Expense":
-    st.subheader("🧾 AI OCR Receipt Scanner & Expense Splitter")
+    st.subheader("🧾 AI OCR Receipt Scanner & Itemized Breakdown")
     
-    # Initialize session state for OCR auto-filled values if not present
     if "ocr_scanned_cost" not in st.session_state:
         st.session_state.ocr_scanned_cost = 0.0
 
     receipt_file = st.file_uploader("Snap or Upload Receipt Photo for OCR Scanner", type=["png", "jpg", "jpeg"])
     
-    scanned_text = ""
-    detected_amount = 0.0
-    
     if receipt_file is not None:
         if st.button("🔍 Run AI OCR Scan on Receipt"):
-            with st.spinner("Scanning receipt pixels for text and totals..."):
+            with st.spinner("Scanning receipt pixels and extracting total amount..."):
                 scanned_text, detected_amount = scan_receipt_with_ocr(receipt_file)
                 st.session_state.ocr_scanned_cost = detected_amount
-                st.success(f"OCR Scan Complete! Auto-detected total: ${detected_amount:,.2f}")
+                if detected_amount > 0:
+                    st.success(f"OCR Scan Successful! Auto-detected total: ${detected_amount:,.2f}")
+                else:
+                    st.warning("OCR could not auto-detect a clear total, but you can enter it manually below.")
                 if scanned_text:
                     with st.expander("View Raw OCR Scanned Text"):
                         st.text(scanned_text)
 
-    exp_desc = st.text_input("Merchant / Expense Description (e.g., Staples Printer Ink)")
+    exp_desc = st.text_input("Merchant / Overall Expense Description (e.g., Office Depot Supplies)")
     
     suggested_index = auto_categorize_expense(exp_desc) if exp_desc else 12
-    category = st.selectbox("Schedule C Category (Auto-Suggested)", SCHEDULE_C_CATEGORIES, index=suggested_index)
+    category = st.selectbox("Primary Schedule C Category", SCHEDULE_C_CATEGORIES, index=suggested_index)
     
-    # Use OCR detected amount as default if available
     exp_cost = st.number_input("Total Receipt Amount Paid ($)", min_value=0.0, value=st.session_state.ocr_scanned_cost, step=10.0, format="%.2f")
     
     business_percentage = st.slider(
-        "Business Use Percentage (%) — Move to 0% if personal!", 
+        "Business Use Percentage (%)", 
         min_value=0, max_value=100, value=100, step=5
     )
     
+    # NEW: Itemized Line-Items Builder
+    st.write("---")
+    st.write("🛒 **Optional: Itemize Individual Receipt Items & Prices**")
+    st.write("Break down what was bought so you have line-item clarity for your records.")
+    
+    num_items = st.number_input("How many individual line items to itemize?", min_value=0, max_value=10, value=0, step=1)
+    
+    itemized_list = []
+    if num_items > 0:
+        for idx in range(int(num_items)):
+            cols = st.columns([2, 1, 2])
+            with cols[0]:
+                it_name = st.text_input(f"Item #{idx+1} Name", key=f"it_name_{idx}")
+            with cols[1]:
+                it_price = st.number_input(f"Price ($)", min_value=0.0, step=1.0, key=f"it_price_{idx}")
+            with cols[2]:
+                it_cat = st.selectbox(f"Category", SCHEDULE_C_CATEGORIES, key=f"it_cat_{idx}")
+            
+            if it_name:
+                itemized_list.append({
+                    "Item": it_name,
+                    "Price": f"${it_price:,.2f}",
+                    "Category": it_cat.split(" - ")[0]
+                })
+
     exp_date = st.date_input("Expense Date", value=date.today())
     
-    if st.button("Save Scanned Expense & Write-off", type="primary"):
+    if st.button("Save Itemized Expense & Write-off", type="primary"):
         if exp_desc:
             base_deductible = exp_cost * (business_percentage / 100.0)
             if "50%" in category:
@@ -279,7 +313,6 @@ elif action == "Log Business Expense":
             
             img_b64 = None
             if receipt_file is not None:
-                # Reset file pointer and read bytes for base64 storage
                 receipt_file.seek(0)
                 img_bytes = receipt_file.read()
                 img_b64 = base64.b64encode(img_bytes).decode('utf-8')
@@ -291,14 +324,15 @@ elif action == "Log Business Expense":
                 "cost": deductible_amount,
                 "raw_cost": exp_cost,
                 "business_percentage": business_percentage,
+                "itemized_items": itemized_list,
                 "receipt_img_b64": img_b64
             })
             save_data(st.session_state.data)
-            st.success(f"Successfully processed receipt! Tax write-off logged: -${deductible_amount:,.2f} ({business_percentage}% business use).")
+            st.success(f"Successfully logged itemized expense! Tax write-off: -${deductible_amount:,.2f}.")
             st.session_state.ocr_scanned_cost = 0.0
             st.balloons()
         else:
-            st.warning("Please enter an expense description or merchant name.")
+            st.warning("Please enter an overall expense description or merchant name.")
 
 # --- VIEW 4: IMPORT BANK CSV ---
 elif action == "Import Bank CSV":
@@ -359,6 +393,7 @@ elif action == "Import Bank CSV":
                             "cost": cost_val * ded_rate,
                             "raw_cost": cost_val,
                             "business_percentage": 100,
+                            "itemized_items": [],
                             "receipt_img_b64": None
                         })
                         imported_count += 1
@@ -366,7 +401,7 @@ elif action == "Import Bank CSV":
                     continue
             
             save_data(st.session_state.data)
-            st.success(f"Successfully imported {imported_count} transactions with smart categorization!")
+            st.success(f"Successfully imported {imported_count} transactions!")
             st.balloons()
 
 # --- VIEW 5: QUARTERLY TAX REPORT & PDF EXPORT ---
